@@ -1,0 +1,103 @@
+# Workflow: Backend Continuous Integration
+# Purpose: Lint, test, and build the backend on PRs to main (backend path). Manual runs allowed.
+# TODO: If Python version changes, update "python-version" below.
+
+name: Backend Continuous Integration
+
+on:
+  # Trigger on pull requests to main when backend files change
+  pull_request:
+    branches: [ main ]
+    paths:
+      - starter/backend/**
+  # Allow manual runs
+  workflow_dispatch: {}
+
+jobs:
+  # Lint and test run in parallel by default
+  lint:
+    name: Lint (backend)
+    runs-on: ubuntu-latest
+    env:
+      # Keep virtualenv in the project to enable caching
+      PIPENV_VENV_IN_PROJECT: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Setup Python runtime
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      # Install pipenv
+      - name: Install pipenv
+        run: pip install --upgrade pipenv
+
+      # Restore pipenv virtualenv cache
+      - name: Restore pipenv cache
+        uses: actions/cache@v3
+        with:
+          path: starter/backend/.venv
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      # Install dependencies
+      - name: Install dependencies
+        working-directory: starter/backend
+        run: pipenv install
+
+      # Run linter - fails job on errors
+      - name: Run linter
+        working-directory: starter/backend
+        run: pipenv run lint
+
+  test:
+    name: Test (backend)
+    runs-on: ubuntu-latest
+    env:
+      PIPENV_VENV_IN_PROJECT: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install pipenv
+        run: pip install --upgrade pipenv
+
+      - name: Restore pipenv cache
+        uses: actions/cache@v3
+        with:
+          path: starter/backend/.venv
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      - name: Install dependencies
+        working-directory: starter/backend
+        run: pipenv install
+
+      - name: Run tests
+        working-directory: starter/backend
+        run: pipenv run test
+
+  build:
+    # Build only runs after both lint and test succeed
+    name: Build Docker image (backend)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Build Docker image from the backend Dockerfile (no push in CI)
+      # TODO: Adjust image name if you prefer a different local tag
+      - name: Build Docker image
+        run: |
+          docker build -f starter/backend/Dockerfile -t mp-backend:${{ github.sha }} starter/backend

@@ -1,0 +1,198 @@
+# Workflow: Backend Continuous Deployment
+# Purpose: On push to main (backend changes) and manual trigger, lint and test in parallel,
+#          then build+push to ECR and deploy to EKS. If AWS secrets are not configured yet,
+#          this workflow will still pass by running lint/test and skipping push/deploy.
+# CRITICAL: Never hard-code AWS credentials; use GitHub Secrets ONLY.
+# TODO: Set repository secrets before enabling ECR push/deploy:
+#   - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (e.g., us-east-1)
+#   - AWS_ACCOUNT_ID (12-digit)
+#   - EKS_CLUSTER_NAME
+
+name: Backend Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - starter/backend/**
+  workflow_dispatch: {}
+
+jobs:
+  # Preflight: checks whether required AWS secrets are present
+  preflight:
+    name: Preflight (check AWS secrets)
+    runs-on: ubuntu-latest
+    outputs:
+      have_aws: ${{ steps.secrets-check.outputs.have_aws }}
+    steps:
+      - id: secrets-check
+        name: Check required secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && \
+             [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && \
+             [ -n "${{ secrets.AWS_DEFAULT_REGION }}" ] && \
+             [ -n "${{ secrets.AWS_ACCOUNT_ID }}" ] && \
+             [ -n "${{ secrets.EKS_CLUSTER_NAME }}" ]; then
+            echo "have_aws=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_aws=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: Lint (backend)
+    runs-on: ubuntu-latest
+    env:
+      PIPENV_VENV_IN_PROJECT: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install pipenv
+        run: pip install --upgrade pipenv
+
+      - name: Restore pipenv cache
+        uses: actions/cache@v3
+        with:
+          path: starter/backend/.venv
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      - name: Install dependencies
+        working-directory: starter/backend
+        run: pipenv install
+
+      - name: Run linter
+        working-directory: starter/backend
+        run: pipenv run lint
+
+  test:
+    name: Test (backend)
+    runs-on: ubuntu-latest
+    env:
+      PIPENV_VENV_IN_PROJECT: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install pipenv
+        run: pip install --upgrade pipenv
+
+      - name: Restore pipenv cache
+        uses: actions/cache@v3
+        with:
+          path: starter/backend/.venv
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      - name: Install dependencies
+        working-directory: starter/backend
+        run: pipenv install
+
+      - name: Run tests
+        working-directory: starter/backend
+        run: pipenv run test
+
+  build:
+    # Build waits for lint/test + preflight
+    name: Build and Push to ECR (backend)
+    runs-on: ubuntu-latest
+    needs: [lint, test, preflight]
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+      # TODO: Ensure this ECR repository exists
+      ECR_REPOSITORY: mp-backend
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configure AWS only when secrets are available
+      - name: Configure AWS credentials
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # Login to Amazon ECR (3rd-party action) when secrets are available
+      - name: Login to Amazon ECR
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Build Docker image tagged with git SHA (ECR tag if AWS available)
+      - name: Build Docker image (to ECR tag)
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        run: |
+          docker build -f starter/backend/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            starter/backend
+
+      # Build locally (no AWS) so we still validate build step without credentials
+      # TODO: Remove or keep as fallback once AWS secrets are configured
+      - name: Build Docker image (local fallback)
+        if: ${{ needs.preflight.outputs.have_aws != 'true' }}
+        run: |
+          docker build -f starter/backend/Dockerfile \
+            -t mp-backend:$IMAGE_TAG \
+            starter/backend
+
+      # Push image to ECR (only when AWS is configured)
+      - name: Push image to ECR
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+  deploy:
+    name: Deploy to EKS (backend)
+    runs-on: ubuntu-latest
+    needs: [build, preflight]
+    if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+      ECR_REPOSITORY: mp-backend
+      IMAGE_TAG: ${{ github.sha }}
+    defaults:
+      run:
+        working-directory: starter/backend/k8s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      # TODO: Ensure the image name ("backend") matches your kustomization.yaml image name
+      - name: Set image via kustomize
+        run: |
+          kustomize edit set image backend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Apply manifests
+        run: |
+          kustomize build | kubectl apply -f -

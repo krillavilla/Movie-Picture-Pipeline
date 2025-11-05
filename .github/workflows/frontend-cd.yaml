@@ -1,0 +1,201 @@
+# Workflow: Frontend Continuous Deployment
+# Purpose: On push to main (frontend changes) and manual trigger, lint and test in parallel,
+#          then build+push to ECR and deploy to EKS. If AWS secrets are not configured yet,
+#          this workflow will still pass by running lint/test and skipping push/deploy.
+# CRITICAL: Never hard-code AWS credentials; use GitHub Secrets ONLY.
+# TODO: Set repository secrets before enabling ECR push/deploy:
+#   - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (e.g., us-east-1)
+#   - AWS_ACCOUNT_ID (12-digit)
+#   - EKS_CLUSTER_NAME
+#   - REACT_APP_MOVIE_API_URL (backend URL for the frontend build)
+
+name: Frontend Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - starter/frontend/**
+  workflow_dispatch: {}
+
+jobs:
+  # Preflight: checks whether required AWS secrets are present
+  preflight:
+    name: Preflight (check AWS secrets)
+    runs-on: ubuntu-latest
+    outputs:
+      have_aws: ${{ steps.secrets-check.outputs.have_aws }}
+    steps:
+      - id: secrets-check
+        name: Check required secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && \
+             [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && \
+             [ -n "${{ secrets.AWS_DEFAULT_REGION }}" ] && \
+             [ -n "${{ secrets.AWS_ACCOUNT_ID }}" ] && \
+             [ -n "${{ secrets.EKS_CLUSTER_NAME }}" ]; then
+            echo "have_aws=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_aws=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: Lint (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 18.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+
+      - name: Restore npm cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-frontend-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-frontend-
+
+      - name: Install dependencies
+        working-directory: starter/frontend
+        run: npm ci
+
+      - name: Run linter
+        working-directory: starter/frontend
+        run: npm run lint
+
+  test:
+    name: Test (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 18.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+
+      - name: Restore npm cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-frontend-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-frontend-
+
+      - name: Install dependencies
+        working-directory: starter/frontend
+        run: npm ci
+
+      - name: Run tests (CI mode)
+        env:
+          CI: true
+        working-directory: starter/frontend
+        run: npm test
+
+  build:
+    # Build waits for lint/test + preflight
+    name: Build and Push to ECR (frontend)
+    runs-on: ubuntu-latest
+    needs: [lint, test, preflight]
+    env:
+      # ECR registry (constructed from secrets). May be empty if secrets not set.
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+      # TODO: Ensure this ECR repository exists
+      ECR_REPOSITORY: mp-frontend
+      IMAGE_TAG: ${{ github.sha }}
+      # Use secret; fallback to localhost if not provided to keep the build working
+      REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configure AWS only when secrets are available
+      - name: Configure AWS credentials
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # Login to Amazon ECR (3rd-party action) when secrets are available
+      - name: Login to Amazon ECR
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Build Docker image with build-arg for REACT_APP_MOVIE_API_URL and tag with git SHA (ECR tag if AWS available)
+      - name: Build Docker image (to ECR tag)
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        run: |
+          docker build -f starter/frontend/Dockerfile \
+            --build-arg REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL:-http://localhost:5000} \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            starter/frontend
+
+      # Build locally (no AWS) so we still validate build step without credentials
+      # TODO: Remove or keep as fallback once AWS secrets are configured
+      - name: Build Docker image (local fallback)
+        if: ${{ needs.preflight.outputs.have_aws != 'true' }}
+        run: |
+          docker build -f starter/frontend/Dockerfile \
+            --build-arg REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL:-http://localhost:5000} \
+            -t mp-frontend:$IMAGE_TAG \
+            starter/frontend
+
+      # Push image to ECR (only when AWS is configured)
+      - name: Push image to ECR
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+  deploy:
+    name: Deploy to EKS (frontend)
+    runs-on: ubuntu-latest
+    needs: [build, preflight]
+    if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+      ECR_REPOSITORY: mp-frontend
+      IMAGE_TAG: ${{ github.sha }}
+    # All commands below run from the k8s folder to avoid path mistakes
+    defaults:
+      run:
+        working-directory: starter/frontend/k8s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # Update kubeconfig to point kubectl at the target EKS cluster
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # Install kustomize for manifest customization
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      # Update the image tag in kustomization.yaml WITHOUT committing the change
+      # TODO: Ensure the image name ("frontend") matches the name used in your kustomization.yaml
+      - name: Set image via kustomize
+        run: |
+          kustomize edit set image frontend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # Apply manifests to the cluster
+      - name: Apply manifests
+        run: |
+          kustomize build | kubectl apply -f -
