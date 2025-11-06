@@ -129,26 +129,18 @@ jobs:
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
         uses: aws-actions/amazon-ecr-login@v1
 
-      # Build and push Docker image using official action (more reliable than raw docker commands)
-      - name: Build and push to ECR
-        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
-        uses: docker/build-push-action@v4
-        with:
-          context: starter/frontend
-          file: starter/frontend/Dockerfile
-          push: true
-          tags: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/frontend:${{ github.sha }}
-          build-args: |
-            REACT_APP_MOVIE_API_URL=${{ secrets.REACT_APP_MOVIE_API_URL }}
-
-      # Build locally (no AWS) so we still validate build step without credentials
-      - name: Build Docker image (local fallback)
-        if: ${{ needs.preflight.outputs.have_aws != 'true' }}
+      # Build Docker image with build-arg for REACT_APP_MOVIE_API_URL
+      - name: Build Docker image
         run: |
-          docker build -f starter/frontend/Dockerfile \
-            --build-arg REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL:-http://localhost:5000} \
-            -t mp-frontend:$IMAGE_TAG \
-            starter/frontend
+          cd starter/frontend
+          docker build --build-arg=REACT_APP_MOVIE_API_URL=${{ secrets.REACT_APP_MOVIE_API_URL }} --tag mp-frontend:${{ github.sha }} .
+
+      # Tag for ECR and push (only when AWS is configured)
+      - name: Tag and push to ECR
+        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        run: |
+          docker tag mp-frontend:${{ github.sha }} $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
   deploy:
     name: Deploy to EKS (frontend)
