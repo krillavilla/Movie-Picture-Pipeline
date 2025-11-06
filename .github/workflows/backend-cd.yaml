@@ -133,11 +133,15 @@ jobs:
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
         uses: aws-actions/amazon-ecr-login@v1
 
+      # Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       # Build Docker image with tag
       - name: Build Docker image
         run: |
           cd starter/backend
-          docker build --tag mp-backend:${{ github.sha }} .
+          docker buildx build --load --tag mp-backend:${{ github.sha }} .
 
       # Tag for ECR and push (only when AWS is configured)
       - name: Tag and push to ECR
