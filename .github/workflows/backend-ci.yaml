@@ -47,7 +47,7 @@ jobs:
       # Install dependencies
       - name: Install dependencies
         working-directory: starter/backend
-        run: pipenv install
+        run: pipenv install --dev
 
       # Run linter - fails job on errors
       - name: Run linter

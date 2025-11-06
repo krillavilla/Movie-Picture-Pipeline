@@ -107,7 +107,7 @@ jobs:
       # ECR registry (constructed from secrets). May be empty if secrets not set.
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
       # TODO: Ensure this ECR repository exists
-      ECR_REPOSITORY: mp-frontend
+      ECR_REPOSITORY: frontend
       IMAGE_TAG: ${{ github.sha }}
       # Use secret; fallback to localhost if not provided to keep the build working
       REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
@@ -161,7 +161,7 @@ jobs:
     if: ${{ needs.preflight.outputs.have_aws == 'true' }}
     env:
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
-      ECR_REPOSITORY: mp-frontend
+      ECR_REPOSITORY: frontend
       IMAGE_TAG: ${{ github.sha }}
     # All commands below run from the k8s folder to avoid path mistakes
     defaults:

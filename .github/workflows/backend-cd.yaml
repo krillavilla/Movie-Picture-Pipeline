@@ -66,7 +66,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: starter/backend
-        run: pipenv install
+        run: pipenv install --dev
 
       - name: Run linter
         working-directory: starter/backend
@@ -113,7 +113,7 @@ jobs:
     env:
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
       # TODO: Ensure this ECR repository exists
-      ECR_REPOSITORY: mp-backend
+      ECR_REPOSITORY: backend
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - name: Checkout code
@@ -163,7 +163,7 @@ jobs:
     if: ${{ needs.preflight.outputs.have_aws == 'true' }}
     env:
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
-      ECR_REPOSITORY: mp-backend
+      ECR_REPOSITORY: backend
       IMAGE_TAG: ${{ github.sha }}
     defaults:
       run:
