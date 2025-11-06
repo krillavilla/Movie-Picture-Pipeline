@@ -133,28 +133,23 @@ jobs:
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
         uses: aws-actions/amazon-ecr-login@v1
 
-      # Build Docker image tagged with git SHA (ECR tag if AWS available)
-      - name: Build Docker image (to ECR tag)
+      # Build and push Docker image using official action
+      - name: Build and push to ECR
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
-        run: |
-          docker build -f starter/backend/Dockerfile \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            starter/backend
+        uses: docker/build-push-action@v4
+        with:
+          context: starter/backend
+          file: starter/backend/Dockerfile
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
       # Build locally (no AWS) so we still validate build step without credentials
-      # TODO: Remove or keep as fallback once AWS secrets are configured
       - name: Build Docker image (local fallback)
         if: ${{ needs.preflight.outputs.have_aws != 'true' }}
         run: |
           docker build -f starter/backend/Dockerfile \
             -t mp-backend:$IMAGE_TAG \
             starter/backend
-
-      # Push image to ECR (only when AWS is configured)
-      - name: Push image to ECR
-        if: ${{ needs.preflight.outputs.have_aws == 'true' }}
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
   deploy:
     name: Deploy to EKS (backend)
