@@ -131,16 +131,22 @@ jobs:
 
       # Build Docker image with build-arg for REACT_APP_MOVIE_API_URL
       - name: Build Docker image
+        env:
+          REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
         run: |
           cd starter/frontend
-          docker build --build-arg=REACT_APP_MOVIE_API_URL=${{ secrets.REACT_APP_MOVIE_API_URL }} --tag mp-frontend:${{ github.sha }} .
+          docker build --build-arg=REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL} --tag mp-frontend:${{ github.sha }} .
 
       # Tag for ECR and push (only when AWS is configured)
       - name: Tag and push to ECR
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
+        env:
+          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+          ECR_REPOSITORY: frontend
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker tag mp-frontend:${{ github.sha }} $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag mp-frontend:${{ github.sha }} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
 
   deploy:
     name: Deploy to EKS (frontend)
