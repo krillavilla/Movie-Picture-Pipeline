@@ -8,3 +8,4 @@
 # Deployment v8 - plain docker
 # Deployment v9 - fixed env
 # Deployment v10 - inline secrets
+# Deployment v11 - shell variable ECR URI
