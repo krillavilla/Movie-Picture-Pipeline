@@ -5,3 +5,4 @@
 # Deployment v5 - plain docker
 # Deployment v6 - env vars
 # Deployment v7 - buildx
+# Deployment v8 - plain docker
