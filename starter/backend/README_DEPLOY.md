@@ -6,3 +6,4 @@
 # Deployment v6 - env vars
 # Deployment v7 - buildx
 # Deployment v8 - plain docker
+# Deployment v9 - fixed env
