@@ -137,13 +137,9 @@ jobs:
       # Tag for ECR and push (only when AWS is configured)
       - name: Tag and push to ECR
         if: ${{ needs.preflight.outputs.have_aws == 'true' }}
-        env:
-          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
-          ECR_REPOSITORY: backend
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker tag mp-backend:${{ github.sha }} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
-          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          docker tag mp-backend:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/backend:${{ github.sha }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/backend:${{ github.sha }}
 
   deploy:
     name: Deploy to EKS (backend)
