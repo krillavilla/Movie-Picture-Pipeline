@@ -103,14 +103,6 @@ jobs:
     name: Build and Push to ECR (frontend)
     runs-on: ubuntu-latest
     needs: [lint, test, preflight]
-    env:
-      # ECR registry (constructed from secrets). May be empty if secrets not set.
-      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
-      # TODO: Ensure this ECR repository exists
-      ECR_REPOSITORY: frontend
-      IMAGE_TAG: ${{ github.sha }}
-      # Use secret; fallback to localhost if not provided to keep the build working
-      REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

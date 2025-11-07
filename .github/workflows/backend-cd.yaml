@@ -110,11 +110,6 @@ jobs:
     name: Build and Push to ECR (backend)
     runs-on: ubuntu-latest
     needs: [lint, test, preflight]
-    env:
-      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
-      # TODO: Ensure this ECR repository exists
-      ECR_REPOSITORY: backend
-      IMAGE_TAG: ${{ github.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
