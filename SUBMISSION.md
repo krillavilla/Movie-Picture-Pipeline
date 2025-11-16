@@ -4,7 +4,15 @@
 https://github.com/krillavilla/Movie-Picture-Pipeline
 
 ## GitHub Actions Workflows
-All workflows are passing: https://github.com/krillavilla/Movie-Picture-Pipeline/actions
+
+**All 4 workflows have successful runs:**
+
+1. ✅ **Frontend Continuous Integration** - Run #19402412745
+2. ✅ **Backend Continuous Integration** - Run #19402412844
+3. ✅ **Frontend Continuous Deployment** - Run #19401926686
+4. ✅ **Backend Continuous Deployment** - Run #19401898516
+
+**View all workflows:** https://github.com/krillavilla/Movie-Picture-Pipeline/actions
 
 ## Live Application URLs
 
